@@ -36,12 +36,42 @@ while ($null -eq $whatsAppProcess -and $stopwatch.Elapsed.TotalSeconds -lt $time
     }
 }
 
-# Step 3: Attempt to close the captured process
-if ($null -eq $whatsAppProcess) {
+# Step 3: Wait for WhatsApp to finish loading (CPU Idle) then close
+if ($null -ne $whatsAppProcess) {
     
-} else {
+    $cpuUsageSettled = $false
+    $idleChecks = 0
+    
+    # Give it a max of 15 extra seconds to load so the script doesn't hang forever
+    $loadTimeout = 15 
+    $loadStopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+
+    while (-not $cpuUsageSettled -and $loadStopwatch.Elapsed.TotalSeconds -lt $loadTimeout) {
+        # Check current CPU time
+        $cpu1 = $whatsAppProcess.TotalProcessorTime
+        Start-Sleep -Milliseconds 500
+        
+        # Refresh the process stats and check CPU time again
+        $whatsAppProcess.Refresh()
+        $cpu2 = $whatsAppProcess.TotalProcessorTime
+        
+        # If the CPU time difference is tiny, the app is idling
+        if (($cpu2 - $cpu1).TotalMilliseconds -lt 15) {
+            $idleChecks++
+            # Require 3 consecutive idle checks (1.5 seconds of peace) to confirm it loaded
+            if ($idleChecks -ge 3) { 
+                $cpuUsageSettled = $true 
+            }
+        } else {
+            # It's still loading/syncing, reset the counter
+            $idleChecks = 0
+        }
+    }
+    
+    # Step 4: Safely close the window now that it's loaded
     try {
         $whatsAppProcess.CloseMainWindow() | Out-Null
     } catch {
+        # Silently fail if the process already closed
     }
 }
